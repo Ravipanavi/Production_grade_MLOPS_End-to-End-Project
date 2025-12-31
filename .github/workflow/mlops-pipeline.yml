@@ -1,0 +1,53 @@
+name: MLOps CI-CD-CT Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install training dependencies
+        run: |
+          pip install -r training/requirements.txt
+
+      - name: Run unit tests
+        run: |
+          python -m compileall training app monitoring
+
+  ct:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trigger Airflow Training DAG
+        run: |
+          curl -X POST http://AIRFLOW_PUBLIC_IP:8080/api/v1/dags/training_dag/dagRuns \
+          -H "Content-Type: application/json" \
+          -d '{"conf": {"trigger": "github"}}'
+
+  cd:
+    needs: ct
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build inference image
+        run: |
+          docker build -t amazon-reviews-api app/
+
+      - name: Push to ECR
+        run: |
+          aws ecr get-login-password --region ap-south-1 | \
+          docker login --username AWS --password-stdin $ECR_URI
+          docker tag amazon-reviews-api:latest $ECR_URI:latest
+          docker push $ECR_URI:latest
