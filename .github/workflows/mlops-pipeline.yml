@@ -28,11 +28,29 @@ jobs:
 
     - name: Train and Package Model
       run: |
+        # Handle potential nested directory structure
+        ROOT_DIR="."
+        if [ -d "Production_Grade_MLOps" ]; then
+          ROOT_DIR="Production_Grade_MLOps"
+        fi
+        cd $ROOT_DIR
+
         mkdir -p models
         python scripts/train.py --model-dir models
-        cp app/inference.py models/
+
+        # Check for inference.py in app/ or scripts/
+        if [ -f "app/inference.py" ]; then
+          cp app/inference.py models/
+        else
+          cp scripts/inference.py models/
+        fi
+
         cp scripts/requirements.txt models/
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
+
+        if [ "$ROOT_DIR" != "." ]; then
+          mv models ..
+        fi
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
