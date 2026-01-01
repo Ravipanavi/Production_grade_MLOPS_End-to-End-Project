@@ -37,15 +37,19 @@ jobs:
         fi
         
         echo "Found train.py at: $TRAIN_PATH"
-        PROJECT_ROOT=$(dirname $(dirname $TRAIN_PATH))
-        cd $PROJECT_ROOT
-        echo "Changed directory to: $(pwd)"
         
-        # Get the actual scripts directory name (e.g., scripts or Scripts)
-        SCRIPTS_DIR=$(basename $(dirname "$TRAIN_PATH"))
+        # Get absolute paths to avoid relative path confusion
+        TRAIN_ABS_PATH=$(readlink -f "$TRAIN_PATH")
+        SCRIPTS_DIR=$(dirname "$TRAIN_ABS_PATH")
+        PROJECT_ROOT=$(dirname "$SCRIPTS_DIR")
+        
+        echo "Scripts Dir: $SCRIPTS_DIR"
+        echo "Project Root: $PROJECT_ROOT"
+        
+        cd "$PROJECT_ROOT"
 
         mkdir -p models
-        python "$SCRIPTS_DIR/train.py" --model-dir models
+        python "$TRAIN_ABS_PATH" --model-dir models
 
         # Check for inference.py in app/ or scripts/
         if [ -f "app/inference.py" ]; then
@@ -61,7 +65,7 @@ jobs:
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
 
         # Move models to workspace root if we are in a subdirectory
-        if [ "$PROJECT_ROOT" != "." ]; then
+        if [ "$PROJECT_ROOT" != "$GITHUB_WORKSPACE" ] && [ "$PROJECT_ROOT" != "." ]; then
           mv models "$GITHUB_WORKSPACE/"
         fi
 
@@ -77,30 +81,52 @@ jobs:
         aws s3 cp models/model.tar.gz \
           s3://${{ secrets.S3_BUCKET }}/amazon-reviews/model.tar.gz
 
-    - name: Create or Update SageMaker Model
+    - name: Deploy to SageMaker
+      env:
+        MODEL_NAME: ${{ secrets.MODEL_NAME }}
+        ENDPOINT_NAME: ${{ secrets.ENDPOINT_NAME }}
+        AWS_REGION: ${{ secrets.AWS_REGION }}
+        SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+        S3_BUCKET: ${{ secrets.S3_BUCKET }}
       run: |
+        # Generate a unique tag for this deployment
+        TIMESTAMP=$(date +%Y-%m-%d-%H-%M-%S)
+        UNIQUE_MODEL_NAME="${MODEL_NAME}-${TIMESTAMP}"
+        UNIQUE_CONFIG_NAME="${MODEL_NAME}-config-${TIMESTAMP}"
+        
+        echo "Deploying Model: $UNIQUE_MODEL_NAME"
+        
+        # 1. Create SageMaker Model
         aws sagemaker create-model \
-          --model-name ${{ secrets.MODEL_NAME }} \
+          --model-name "$UNIQUE_MODEL_NAME" \
           --primary-container \
-            Image=720646828776.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3,\
-            ModelDataUrl=s3://${{ secrets.S3_BUCKET }}/amazon-reviews/model.tar.gz \
-          --execution-role-arn ${{ secrets.SAGEMAKER_ROLE_ARN }} \
-          --region ${{ secrets.AWS_REGION }} || echo "Model exists"
-
-    - name: Create Endpoint Config
-      run: |
+            Image=720646828776.dkr.ecr.${AWS_REGION}.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3,\
+            ModelDataUrl=s3://${S3_BUCKET}/amazon-reviews/model.tar.gz \
+          --execution-role-arn "$SAGEMAKER_ROLE_ARN" \
+          --region "$AWS_REGION"
+          
+        # 2. Create Endpoint Configuration
         aws sagemaker create-endpoint-config \
-          --endpoint-config-name ${{ secrets.MODEL_NAME }}-config \
+          --endpoint-config-name "$UNIQUE_CONFIG_NAME" \
           --production-variants \
             VariantName=AllTraffic,\
-            ModelName=${{ secrets.MODEL_NAME }},\
+            ModelName="$UNIQUE_MODEL_NAME",\
             InitialInstanceCount=1,\
             InstanceType=ml.m5.large \
-          --region ${{ secrets.AWS_REGION }}
-
-    - name: Update Endpoint
-      run: |
-        aws sagemaker update-endpoint \
-          --endpoint-name ${{ secrets.ENDPOINT_NAME }} \
-          --endpoint-config-name ${{ secrets.MODEL_NAME }}-config \
-          --region ${{ secrets.AWS_REGION }}
+          --region "$AWS_REGION"
+          
+        # 3. Create or Update Endpoint
+        # Check if endpoint exists
+        if aws sagemaker describe-endpoint --endpoint-name "$ENDPOINT_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+          echo "Endpoint $ENDPOINT_NAME exists. Updating..."
+          aws sagemaker update-endpoint \
+            --endpoint-name "$ENDPOINT_NAME" \
+            --endpoint-config-name "$UNIQUE_CONFIG_NAME" \
+            --region "$AWS_REGION"
+        else
+          echo "Endpoint $ENDPOINT_NAME does not exist. Creating..."
+          aws sagemaker create-endpoint \
+            --endpoint-name "$ENDPOINT_NAME" \
+            --endpoint-config-name "$UNIQUE_CONFIG_NAME" \
+            --region "$AWS_REGION"
+        fi
