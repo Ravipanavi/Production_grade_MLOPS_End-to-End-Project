@@ -23,6 +23,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install scikit-learn joblib numpy boto3
 
+    - name: Debug Directory Structure
+      run: ls -R
+
     - name: Train and Package Model
       run: |
         mkdir -p models
