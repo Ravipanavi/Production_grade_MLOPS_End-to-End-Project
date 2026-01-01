@@ -28,10 +28,10 @@ jobs:
 
     - name: Train and Package Model
       run: |
-        # Dynamically find the project root based on train.py location
-        TRAIN_PATH=$(find . -name train.py -type f -print -quit)
+        # Dynamically find the project root based on scripts/train.py location
+        TRAIN_PATH=$(find . -ipath "*/scripts/train.py" -type f -print -quit)
         if [ -z "$TRAIN_PATH" ]; then
-          echo "::error::train.py not found in repository"
+          echo "::error::scripts/train.py not found in repository"
           ls -R
           exit 1
         fi
@@ -40,21 +40,24 @@ jobs:
         PROJECT_ROOT=$(dirname $(dirname $TRAIN_PATH))
         cd $PROJECT_ROOT
         echo "Changed directory to: $(pwd)"
+        
+        # Get the actual scripts directory name (e.g., scripts or Scripts)
+        SCRIPTS_DIR=$(basename $(dirname "$TRAIN_PATH"))
 
         mkdir -p models
-        python scripts/train.py --model-dir models
+        python "$SCRIPTS_DIR/train.py" --model-dir models
 
         # Check for inference.py in app/ or scripts/
         if [ -f "app/inference.py" ]; then
           cp app/inference.py models/
-        elif [ -f "scripts/inference.py" ]; then
-          cp scripts/inference.py models/
+        elif [ -f "$SCRIPTS_DIR/inference.py" ]; then
+          cp "$SCRIPTS_DIR/inference.py" models/
         else
           echo "::error::inference.py not found"
           exit 1
         fi
 
-        cp scripts/requirements.txt models/
+        cp "$SCRIPTS_DIR/requirements.txt" models/
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
 
         # Move models to workspace root if we are in a subdirectory
