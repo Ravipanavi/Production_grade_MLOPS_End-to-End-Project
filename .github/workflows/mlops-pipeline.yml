@@ -28,12 +28,18 @@ jobs:
 
     - name: Train and Package Model
       run: |
-        # Handle potential nested directory structure
-        ROOT_DIR="."
-        if [ -d "Production_Grade_MLOps" ]; then
-          ROOT_DIR="Production_Grade_MLOps"
+        # Dynamically find the project root based on train.py location
+        TRAIN_PATH=$(find . -name train.py -type f -print -quit)
+        if [ -z "$TRAIN_PATH" ]; then
+          echo "::error::train.py not found in repository"
+          ls -R
+          exit 1
         fi
-        cd $ROOT_DIR
+        
+        echo "Found train.py at: $TRAIN_PATH"
+        PROJECT_ROOT=$(dirname $(dirname $TRAIN_PATH))
+        cd $PROJECT_ROOT
+        echo "Changed directory to: $(pwd)"
 
         mkdir -p models
         python scripts/train.py --model-dir models
@@ -41,15 +47,19 @@ jobs:
         # Check for inference.py in app/ or scripts/
         if [ -f "app/inference.py" ]; then
           cp app/inference.py models/
-        else
+        elif [ -f "scripts/inference.py" ]; then
           cp scripts/inference.py models/
+        else
+          echo "::error::inference.py not found"
+          exit 1
         fi
 
         cp scripts/requirements.txt models/
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
 
-        if [ "$ROOT_DIR" != "." ]; then
-          mv models ..
+        # Move models to workspace root if we are in a subdirectory
+        if [ "$PROJECT_ROOT" != "." ]; then
+          mv models "$GITHUB_WORKSPACE/"
         fi
 
     - name: Configure AWS credentials
