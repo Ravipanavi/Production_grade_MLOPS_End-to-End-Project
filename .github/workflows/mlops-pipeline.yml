@@ -23,7 +23,7 @@ jobs:
     - name: Upload model artifacts to S3
       run: |
         aws s3 cp models/model.tar.gz \
-          s3://${{ secrets.S3_BUCKET }}/amazon-reviews/sentiment/v1/model.tar.gz
+          s3://${{ secrets.S3_BUCKET }}/amazon-reviews/flat_model.tar.gz
 
     - name: Create or Update SageMaker Model
       run: |
