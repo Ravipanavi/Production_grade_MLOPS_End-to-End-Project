@@ -13,6 +13,24 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install scikit-learn joblib numpy boto3
+
+    - name: Train and Package Model
+      run: |
+        mkdir -p models
+        python scripts/train.py --model-dir models
+        cp app/inference.py models/
+        cp scripts/requirements.txt models/
+        tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
+
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -23,7 +41,7 @@ jobs:
     - name: Upload model artifacts to S3
       run: |
         aws s3 cp models/model.tar.gz \
-          s3://${{ secrets.S3_BUCKET }}/amazon-reviews/flat_model.tar.gz
+          s3://${{ secrets.S3_BUCKET }}/amazon-reviews/model.tar.gz
 
     - name: Create or Update SageMaker Model
       run: |
@@ -31,7 +49,7 @@ jobs:
           --model-name ${{ secrets.MODEL_NAME }} \
           --primary-container \
             Image=720646828776.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3,\
-            ModelDataUrl=s3://${{ secrets.S3_BUCKET }}/amazon-reviews/sentiment/v1/model.tar.gz \
+            ModelDataUrl=s3://${{ secrets.S3_BUCKET }}/amazon-reviews/model.tar.gz \
           --execution-role-arn ${{ secrets.SAGEMAKER_ROLE_ARN }} \
           --region ${{ secrets.AWS_REGION }} || echo "Model exists"
 
