@@ -21,17 +21,18 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install scikit-learn joblib numpy boto3
+        pip install scikit-learn joblib numpy boto3 mlflow
 
     - name: Debug Directory Structure
       run: ls -R
 
     - name: Train and Package Model
       run: |
-        # Dynamically find the project root based on scripts/train.py location
-        TRAIN_PATH=$(find . -ipath "*/scripts/train.py" -type f -print -quit)
+        # Dynamically find the project root based on any train.py location
+        TRAIN_PATH=$(find . -name "train.py" -type f | head -n 1)
+        
         if [ -z "$TRAIN_PATH" ]; then
-          echo "::error::scripts/train.py not found in repository"
+          echo "::error::train.py not found in repository"
           ls -R
           exit 1
         fi
@@ -40,28 +41,35 @@ jobs:
         
         # Get absolute paths to avoid relative path confusion
         TRAIN_ABS_PATH=$(readlink -f "$TRAIN_PATH")
-        SCRIPTS_DIR=$(dirname "$TRAIN_ABS_PATH")
-        PROJECT_ROOT=$(dirname "$SCRIPTS_DIR")
+        TRAIN_DIR=$(dirname "$TRAIN_ABS_PATH")
+        PROJECT_ROOT=$(dirname "$TRAIN_DIR")
         
-        echo "Scripts Dir: $SCRIPTS_DIR"
+        echo "Train Dir: $TRAIN_DIR"
         echo "Project Root: $PROJECT_ROOT"
         
         cd "$PROJECT_ROOT"
 
         mkdir -p models
-        python "$TRAIN_ABS_PATH" --model-dir models
+        # Try running with args (if updated script) or without (if original script)
+        python "$TRAIN_ABS_PATH" --model-dir models || (python "$TRAIN_ABS_PATH" && mv model.pkl vectorizer.pkl models/)
 
         # Check for inference.py in app/ or scripts/
         if [ -f "app/inference.py" ]; then
           cp app/inference.py models/
-        elif [ -f "$SCRIPTS_DIR/inference.py" ]; then
-          cp "$SCRIPTS_DIR/inference.py" models/
+        elif [ -f "scripts/inference.py" ]; then
+          cp "scripts/inference.py" models/
         else
           echo "::error::inference.py not found"
           exit 1
         fi
 
-        cp "$SCRIPTS_DIR/requirements.txt" models/
+        if [ -f "scripts/requirements.txt" ]; then
+          cp "scripts/requirements.txt" models/
+        else
+          echo "::error::scripts/requirements.txt not found"
+          exit 1
+        fi
+        
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
 
         # Move models to workspace root if we are in a subdirectory
