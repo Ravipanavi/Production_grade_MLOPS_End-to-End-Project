@@ -33,14 +33,18 @@ jobs:
           cd Production_Grade_MLOps
         fi
         
-        if [ ! -f "scripts/train.py" ]; then
-          echo "::error::scripts/train.py not found in repository"
+        if [ -f "scripts/train.py" ]; then
+          TRAIN_SCRIPT="scripts/train.py"
+        elif [ -f "training/train.py" ]; then
+          TRAIN_SCRIPT="training/train.py"
+        else
+          echo "::error::train.py not found in scripts/ or training/"
           ls -R
           exit 1
         fi
 
         mkdir -p models
-        python scripts/train.py --model-dir models
+        python "$TRAIN_SCRIPT" --model-dir models
 
         # Check for inference.py in app/ or scripts/
         if [ -f "app/inference.py" ]; then
@@ -54,8 +58,12 @@ jobs:
 
         if [ -f "scripts/requirements.txt" ]; then
           cp "scripts/requirements.txt" models/
+        elif [ -f "training/requirements.txt" ]; then
+          cp "training/requirements.txt" models/
+        elif [ -f "app/requirements.txt" ]; then
+          cp "app/requirements.txt" models/
         else
-          echo "::error::scripts/requirements.txt not found"
+          echo "::error::requirements.txt not found"
           exit 1
         fi
         
