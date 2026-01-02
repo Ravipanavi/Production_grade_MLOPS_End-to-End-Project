@@ -97,15 +97,17 @@ jobs:
         fi
         
         # Handle requirements.txt
+        # Exclude scikit-learn to prevent container conflicts, ensure joblib/numpy
         if [ -f "scripts/requirements.txt" ]; then 
-          cp scripts/requirements.txt models/
+          grep -v "scikit-learn" scripts/requirements.txt > models/requirements.txt || true
         elif [ -f "app/requirements.txt" ]; then 
-          cp app/requirements.txt models/
+          grep -v "scikit-learn" app/requirements.txt > models/requirements.txt || true
         else 
-          echo "scikit-learn" > models/requirements.txt
-          echo "joblib" >> models/requirements.txt
-          echo "numpy" >> models/requirements.txt
+          touch models/requirements.txt
         fi
+        
+        if ! grep -q "joblib" models/requirements.txt; then echo "joblib" >> models/requirements.txt; fi
+        if ! grep -q "numpy" models/requirements.txt; then echo "numpy" >> models/requirements.txt; fi
         
         # 5. Package everything (Flat structure)
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
@@ -164,7 +166,7 @@ jobs:
         aws sagemaker create-endpoint-config \
           --endpoint-config-name "$UNIQUE_CONFIG_NAME" \
           --production-variants \
-            "VariantName=AllTraffic,ModelName=$UNIQUE_MODEL_NAME,InitialInstanceCount=1,InstanceType=ml.m5.large" \
+            "VariantName=AllTraffic,ModelName=$UNIQUE_MODEL_NAME,InitialInstanceCount=1,InstanceType=ml.t2.medium" \
           --region "$AWS_REGION"
           
         # 3. Create or Update Endpoint
