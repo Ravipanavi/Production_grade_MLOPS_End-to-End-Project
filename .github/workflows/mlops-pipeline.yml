@@ -35,13 +35,10 @@ jobs:
         fi
         
         # 2. Locate train.py (prefer scripts/, fall back to training/)
-        if [ -f "scripts/train.py" ]; then
-          TRAIN_SCRIPT="scripts/train.py"
-        elif [ -f "training/train.py" ]; then
-          TRAIN_SCRIPT="training/train.py"
-        else
+        TRAIN_SCRIPT=$(find . -name "train.py" -type f | head -n 1)
+        if [ -z "$TRAIN_SCRIPT" ]; then
           echo "::error::train.py not found in scripts/ or training/"
-          find . -maxdepth 3 -name "train.py"
+          find . -name "train.py"
           exit 1
         fi
         
@@ -52,13 +49,20 @@ jobs:
         # We pass --model-dir, but if the script ignores it, files land in root.
         python "$TRAIN_SCRIPT" --model-dir models
         
+        echo "Training complete. Searching for generated artifacts..."
+        find . -name "*.pkl"
+        
         # 4. Consolidate artifacts into models/
-        # Check root, script dir, and models dir for artifacts
-        SCRIPT_DIR=$(dirname "$TRAIN_SCRIPT")
-        if [ -f "$SCRIPT_DIR/model.pkl" ]; then mv "$SCRIPT_DIR/model.pkl" models/; fi
-        if [ -f "$SCRIPT_DIR/vectorizer.pkl" ]; then mv "$SCRIPT_DIR/vectorizer.pkl" models/; fi
-        if [ -f "model.pkl" ]; then mv model.pkl models/; fi
-        if [ -f "vectorizer.pkl" ]; then mv vectorizer.pkl models/; fi
+        # Robustly locate and move artifacts to models/ directory
+        for artifact in "model.pkl" "vectorizer.pkl"; do
+          find . -name "$artifact" -type f | while read f; do
+            # Compare absolute paths to avoid moving the file onto itself
+            if [ "$(readlink -f "$f")" != "$(readlink -f models/$artifact)" ]; then
+              echo "Moving $f to models/"
+              mv "$f" models/
+            fi
+          done
+        done
         
         # Verify artifacts exist before tarring
         if [ ! -f "models/model.pkl" ] || [ ! -f "models/vectorizer.pkl" ]; then
@@ -68,8 +72,17 @@ jobs:
         fi
         
         # 5. Copy inference code and requirements
-        if [ -f "scripts/inference.py" ]; then cp scripts/inference.py models/; elif [ -f "app/inference.py" ]; then cp app/inference.py models/; fi
-        if [ -f "scripts/requirements.txt" ]; then cp scripts/requirements.txt models/; elif [ -f "training/requirements.txt" ]; then cp training/requirements.txt models/; elif [ -f "app/requirements.txt" ]; then cp app/requirements.txt models/; else touch models/requirements.txt; fi
+        # Find inference.py
+        INFERENCE_SCRIPT=$(find . -name "inference.py" -type f | head -n 1)
+        if [ -n "$INFERENCE_SCRIPT" ]; then 
+          cp "$INFERENCE_SCRIPT" models/
+        else 
+          echo "::error::inference.py not found"; exit 1
+        fi
+
+        # Find requirements.txt
+        REQUIREMENTS_FILE=$(find . -name "requirements.txt" -type f | head -n 1)
+        if [ -n "$REQUIREMENTS_FILE" ]; then cp "$REQUIREMENTS_FILE" models/; else touch models/requirements.txt; fi
         
         # 6. Package everything
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
