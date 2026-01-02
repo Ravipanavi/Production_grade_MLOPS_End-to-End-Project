@@ -118,6 +118,17 @@ jobs:
         SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
         S3_BUCKET: ${{ secrets.S3_BUCKET }}
       run: |
+        if [ -z "$MODEL_NAME" ] || [ -z "$ENDPOINT_NAME" ]; then
+          echo "::error::MODEL_NAME or ENDPOINT_NAME secrets are not set."
+          exit 1
+        fi
+
+        # Sanitize Names (SageMaker does not allow underscores)
+        # Replace '_' with '-' and remove any non-alphanumeric characters (except hyphens)
+        # Also ensure it doesn't start or end with a hyphen and is within limits (30 chars for model to allow suffix)
+        MODEL_NAME=$(echo "$MODEL_NAME" | tr '_' '-' | sed 's/[^a-zA-Z0-9-]//g' | sed 's/^-*//' | sed 's/-*$//' | cut -c 1-30)
+        ENDPOINT_NAME=$(echo "$ENDPOINT_NAME" | tr '_' '-' | sed 's/[^a-zA-Z0-9-]//g' | sed 's/^-*//' | sed 's/-*$//' | cut -c 1-63)
+        
         # Generate a unique tag for this deployment
         TIMESTAMP=$(date +%Y-%m-%d-%H-%M-%S)
         UNIQUE_MODEL_NAME="${MODEL_NAME}-${TIMESTAMP}"
