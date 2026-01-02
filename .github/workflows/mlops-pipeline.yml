@@ -46,6 +46,12 @@ jobs:
         mkdir -p models
         python "$TRAIN_SCRIPT" --model-dir models
 
+        # If the script saved artifacts to the current directory instead of models/, move them
+        if [ ! -f "models/model.pkl" ] && [ -f "model.pkl" ]; then
+          echo "Artifacts generated in root directory. Moving to models/..."
+          mv model.pkl vectorizer.pkl models/
+        fi
+
         # Check for inference.py in app/ or scripts/
         if [ -f "app/inference.py" ]; then
           cp app/inference.py models/
