@@ -53,6 +53,10 @@ jobs:
         python "$TRAIN_SCRIPT" --model-dir models
         
         # 4. Consolidate artifacts into models/
+        # Check root, script dir, and models dir for artifacts
+        SCRIPT_DIR=$(dirname "$TRAIN_SCRIPT")
+        if [ -f "$SCRIPT_DIR/model.pkl" ]; then mv "$SCRIPT_DIR/model.pkl" models/; fi
+        if [ -f "$SCRIPT_DIR/vectorizer.pkl" ]; then mv "$SCRIPT_DIR/vectorizer.pkl" models/; fi
         if [ -f "model.pkl" ]; then mv model.pkl models/; fi
         if [ -f "vectorizer.pkl" ]; then mv vectorizer.pkl models/; fi
         
