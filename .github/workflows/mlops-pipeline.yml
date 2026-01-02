@@ -28,54 +28,49 @@ jobs:
 
     - name: Train and Package Model
       run: |
-        # Handle potential nested directory structure
+        # 1. Handle potential nested directory structure
         if [ ! -d "scripts" ] && [ -d "Production_Grade_MLOps/scripts" ]; then
+          echo "Detected nested structure. Changing directory to Production_Grade_MLOps"
           cd Production_Grade_MLOps
         fi
         
+        # 2. Locate train.py (prefer scripts/, fall back to training/)
         if [ -f "scripts/train.py" ]; then
           TRAIN_SCRIPT="scripts/train.py"
         elif [ -f "training/train.py" ]; then
           TRAIN_SCRIPT="training/train.py"
         else
           echo "::error::train.py not found in scripts/ or training/"
-          ls -R
-          exit 1
-        fi
-
-        mkdir -p models
-        python "$TRAIN_SCRIPT" --model-dir models
-
-        # If the script saved artifacts to the current directory instead of models/, move them
-        if [ ! -f "models/model.pkl" ] && [ -f "model.pkl" ]; then
-          echo "Artifacts generated in root directory. Moving to models/..."
-          mv model.pkl vectorizer.pkl models/
-        fi
-
-        # Check for inference.py in app/ or scripts/
-        if [ -f "app/inference.py" ]; then
-          cp app/inference.py models/
-        elif [ -f "scripts/inference.py" ]; then
-          cp "scripts/inference.py" models/
-        else
-          echo "::error::inference.py not found"
-          exit 1
-        fi
-
-        if [ -f "scripts/requirements.txt" ]; then
-          cp "scripts/requirements.txt" models/
-        elif [ -f "training/requirements.txt" ]; then
-          cp "training/requirements.txt" models/
-        elif [ -f "app/requirements.txt" ]; then
-          cp "app/requirements.txt" models/
-        else
-          echo "::error::requirements.txt not found"
+          find . -maxdepth 3 -name "train.py"
           exit 1
         fi
         
+        echo "Using training script: $TRAIN_SCRIPT"
+        mkdir -p models
+        
+        # 3. Train the model
+        # We pass --model-dir, but if the script ignores it, files land in root.
+        python "$TRAIN_SCRIPT" --model-dir models
+        
+        # 4. Consolidate artifacts into models/
+        if [ -f "model.pkl" ]; then mv model.pkl models/; fi
+        if [ -f "vectorizer.pkl" ]; then mv vectorizer.pkl models/; fi
+        
+        # Verify artifacts exist before tarring
+        if [ ! -f "models/model.pkl" ] || [ ! -f "models/vectorizer.pkl" ]; then
+          echo "::error::Model artifacts missing from models/ directory. Listing current directory:"
+          ls -R
+          exit 1
+        fi
+        
+        # 5. Copy inference code and requirements
+        if [ -f "scripts/inference.py" ]; then cp scripts/inference.py models/; elif [ -f "app/inference.py" ]; then cp app/inference.py models/; fi
+        if [ -f "scripts/requirements.txt" ]; then cp scripts/requirements.txt models/; elif [ -f "training/requirements.txt" ]; then cp training/requirements.txt models/; elif [ -f "app/requirements.txt" ]; then cp app/requirements.txt models/; else touch models/requirements.txt; fi
+        
+        # 6. Package everything
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
-
-        # Move models to workspace root if we are in a subdirectory
+        
+        # 7. Move models to workspace root if we are in a subdirectory
         if [ "$(pwd)" != "$GITHUB_WORKSPACE" ]; then
           mv models "$GITHUB_WORKSPACE/"
         fi
