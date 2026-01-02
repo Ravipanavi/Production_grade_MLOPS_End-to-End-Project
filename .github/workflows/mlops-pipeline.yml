@@ -84,13 +84,30 @@ jobs:
           exit 1
         fi
         
-        # 4. Copy inference code and requirements
-        # Prefer scripts/inference.py, fallback to app/inference.py
-        if [ -f "scripts/inference.py" ]; then cp scripts/inference.py models/; elif [ -f "app/inference.py" ]; then cp app/inference.py models/; else echo "::error::inference.py not found"; exit 1; fi
+        # 4. Prepare model artifacts (Flat structure to match working manual steps)
         
-        if [ -f "scripts/requirements.txt" ]; then cp scripts/requirements.txt models/; elif [ -f "app/requirements.txt" ]; then cp app/requirements.txt models/; else echo "scikit-learn" > models/requirements.txt; echo "joblib" >> models/requirements.txt; fi
+        # Copy inference script to root of models/
+        if [ -f "scripts/inference.py" ]; then 
+          cp scripts/inference.py models/
+        elif [ -f "app/inference.py" ]; then 
+          cp app/inference.py models/
+        else 
+          echo "::error::inference.py not found"
+          exit 1
+        fi
         
-        # 5. Package everything
+        # Handle requirements.txt
+        if [ -f "scripts/requirements.txt" ]; then 
+          cp scripts/requirements.txt models/
+        elif [ -f "app/requirements.txt" ]; then 
+          cp app/requirements.txt models/
+        else 
+          echo "scikit-learn" > models/requirements.txt
+          echo "joblib" >> models/requirements.txt
+          echo "numpy" >> models/requirements.txt
+        fi
+        
+        # 5. Package everything (Flat structure)
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
         
         # 6. Move models to workspace root if we are in a subdirectory
