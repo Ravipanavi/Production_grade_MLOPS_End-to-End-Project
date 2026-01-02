@@ -100,15 +100,15 @@ jobs:
         # Handle requirements.txt
         # Exclude scikit-learn to prevent container conflicts, ensure joblib/numpy
         if [ -f "scripts/requirements.txt" ]; then 
-          grep -v "scikit-learn" scripts/requirements.txt > models/code/requirements.txt || true
+          grep -v "scikit-learn" scripts/requirements.txt | grep -v "numpy" > models/code/requirements.txt || true
         elif [ -f "app/requirements.txt" ]; then 
-          grep -v "scikit-learn" app/requirements.txt > models/code/requirements.txt || true
+          grep -v "scikit-learn" app/requirements.txt | grep -v "numpy" > models/code/requirements.txt || true
         else 
           touch models/code/requirements.txt
         fi
         
         if ! grep -q "joblib" models/code/requirements.txt; then echo "joblib" >> models/code/requirements.txt; fi
-        if ! grep -q "numpy" models/code/requirements.txt; then echo "numpy" >> models/code/requirements.txt; fi
+        echo "numpy<2.0.0" >> models/code/requirements.txt
         
         # 5. Package everything (Standard structure: model files at root, code/ dir)
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl code
