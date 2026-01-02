@@ -128,9 +128,7 @@ jobs:
         # 1. Create SageMaker Model
         aws sagemaker create-model \
           --model-name "$UNIQUE_MODEL_NAME" \
-          --primary-container \
-            Image=720646828776.dkr.ecr.${AWS_REGION}.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3,\
-            ModelDataUrl=s3://${S3_BUCKET}/amazon-reviews/model.tar.gz \
+          --primary-container "Image=720646828776.dkr.ecr.${AWS_REGION}.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3,ModelDataUrl=s3://${S3_BUCKET}/amazon-reviews/model.tar.gz" \
           --execution-role-arn "$SAGEMAKER_ROLE_ARN" \
           --region "$AWS_REGION"
           
@@ -138,10 +136,7 @@ jobs:
         aws sagemaker create-endpoint-config \
           --endpoint-config-name "$UNIQUE_CONFIG_NAME" \
           --production-variants \
-            VariantName=AllTraffic,\
-            ModelName="$UNIQUE_MODEL_NAME",\
-            InitialInstanceCount=1,\
-            InstanceType=ml.m5.large \
+            "VariantName=AllTraffic,ModelName=$UNIQUE_MODEL_NAME,InitialInstanceCount=1,InstanceType=ml.m5.large" \
           --region "$AWS_REGION"
           
         # 3. Create or Update Endpoint
