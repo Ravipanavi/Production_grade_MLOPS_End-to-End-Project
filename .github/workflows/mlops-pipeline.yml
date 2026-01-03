@@ -99,8 +99,9 @@ jobs:
           cp app/code/inference.py models/code/inference.py
         else 
           echo "No inference.py found. Creating default inference.py..."
-          cat <<EOF > models/code/inference.py
-import joblib
+          python -c '
+import os
+content = """import joblib
 import os
 import json
 
@@ -114,7 +115,10 @@ def predict_fn(input_data, model):
     if isinstance(input_data, str): input_data = [input_data]
     processed_data = vec.transform(input_data)
     return clf.predict(processed_data)
-EOF
+"""
+with open("models/code/inference.py", "w") as f:
+    f.write(content)
+'
         fi
         
         # 5. Create requirements.txt with pinned versions to match training environment
