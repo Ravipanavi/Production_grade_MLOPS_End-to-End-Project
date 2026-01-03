@@ -114,8 +114,8 @@ jobs:
         fi
         
         # 5. Create requirements.txt with pinned versions to match training environment
-        echo "scikit-learn==1.2.1" > models/code/requirements.txt
-        echo "joblib" >> models/code/requirements.txt
+        # Exclude scikit-learn to rely on container version and avoid reinstall conflicts
+        echo "joblib" > models/code/requirements.txt
         echo "numpy<2.0.0" >> models/code/requirements.txt
         
         # 6. Package everything (Standard structure: model files at root, code/ dir)
@@ -161,7 +161,6 @@ jobs:
         TIMESTAMP=$(date +%Y-%m-%d-%H-%M-%S)
         UNIQUE_MODEL_NAME="${MODEL_NAME}-${TIMESTAMP}"
         UNIQUE_CONFIG_NAME="${MODEL_NAME}-config-${TIMESTAMP}"
-        
         echo "Deploying Model: $UNIQUE_MODEL_NAME"
         
         # 1. Create SageMaker Model
