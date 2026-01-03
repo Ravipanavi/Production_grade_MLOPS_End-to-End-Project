@@ -99,26 +99,18 @@ jobs:
           cp app/code/inference.py models/code/inference.py
         else 
           echo "No inference.py found. Creating default inference.py..."
-          python -c '
-import os
-content = """import joblib
-import os
-import json
-
-def model_fn(model_dir):
-    clf = joblib.load(os.path.join(model_dir, "model.pkl"))
-    vec = joblib.load(os.path.join(model_dir, "vectorizer.pkl"))
-    return clf, vec
-
-def predict_fn(input_data, model):
-    clf, vec = model
-    if isinstance(input_data, str): input_data = [input_data]
-    processed_data = vec.transform(input_data)
-    return clf.predict(processed_data)
-"""
-with open("models/code/inference.py", "w") as f:
-    f.write(content)
-'
+          echo "import joblib" > models/code/inference.py
+          echo "import os" >> models/code/inference.py
+          echo "import json" >> models/code/inference.py
+          echo "def model_fn(model_dir):" >> models/code/inference.py
+          echo "    clf = joblib.load(os.path.join(model_dir, 'model.pkl'))" >> models/code/inference.py
+          echo "    vec = joblib.load(os.path.join(model_dir, 'vectorizer.pkl'))" >> models/code/inference.py
+          echo "    return clf, vec" >> models/code/inference.py
+          echo "def predict_fn(input_data, model):" >> models/code/inference.py
+          echo "    clf, vec = model" >> models/code/inference.py
+          echo "    if isinstance(input_data, str): input_data = [input_data]" >> models/code/inference.py
+          echo "    processed_data = vec.transform(input_data)" >> models/code/inference.py
+          echo "    return clf.predict(processed_data)" >> models/code/inference.py
         fi
         
         # 5. Create requirements.txt with pinned versions to match training environment
