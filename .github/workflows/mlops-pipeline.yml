@@ -96,16 +96,15 @@ jobs:
           exit 1
         fi
         
-        # Handle requirements.txt
-        # We explicitly set requirements to match training environment to ensure compatibility
-        # Exclude scikit-learn as it is pre-installed in the container and re-installing can cause errors
-        echo "joblib" > models/requirements.txt
+        # 5. Create requirements.txt with pinned versions to match training environment
+        echo "scikit-learn==1.2.1" > models/requirements.txt
+        echo "joblib" >> models/requirements.txt
         echo "numpy<2.0.0" >> models/requirements.txt
         
-        # 5. Package everything (Flat structure)
+        # 6. Package everything (Flat structure)
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
         
-        # 6. Move models to workspace root if we are in a subdirectory
+        # 7. Move models to workspace root if we are in a subdirectory
         if [ "$(pwd)" != "$GITHUB_WORKSPACE" ]; then
           mv models "$GITHUB_WORKSPACE/"
         fi
