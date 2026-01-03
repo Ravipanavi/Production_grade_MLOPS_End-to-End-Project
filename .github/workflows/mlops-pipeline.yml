@@ -84,38 +84,28 @@ jobs:
           exit 1
         fi
         
-        # 4. Prepare model artifacts (Flat structure to match working manual steps)
+        # 4. Prepare model artifacts (Standard SageMaker structure with code/ dir)
+        mkdir -p models/code
         
-        # Find and copy inference script to root of models/
-        if [ -f "scripts/inference.py" ]; then 
-          echo "Using scripts/inference.py"
-          cp scripts/inference.py models/
-        elif [ -f "app/inference.py" ]; then 
-          echo "Using app/inference.py"
-          cp app/inference.py models/
-        elif [ -f "app/code/inference.py" ]; then
-          echo "Using app/code/inference.py"
-          cp app/code/inference.py models/inference.py
-        else 
-          echo "No inference.py found. Creating default inference.py..."
-          printf "import joblib\nimport os\nimport json\n\n" > models/inference.py
-          printf "def model_fn(model_dir):\n" >> models/inference.py
-          printf "    clf = joblib.load(os.path.join(model_dir, 'model.pkl'))\n" >> models/inference.py
-          printf "    vec = joblib.load(os.path.join(model_dir, 'vectorizer.pkl'))\n" >> models/inference.py
-          printf "    return clf, vec\n\n" >> models/inference.py
-          printf "def predict_fn(input_data, model):\n" >> models/inference.py
-          printf "    clf, vec = model\n" >> models/inference.py
-          printf "    if isinstance(input_data, str): input_data = [input_data]\n" >> models/inference.py
-          printf "    processed_data = vec.transform(input_data)\n" >> models/inference.py
-          printf "    return clf.predict(processed_data)\n" >> models/inference.py
-        fi
+        # Force creation of a valid inference.py to ensure model_fn exists
+        # We write this to models/code/inference.py (Standard location)
+        printf "import joblib\nimport os\nimport json\n\n" > models/code/inference.py
+        printf "def model_fn(model_dir):\n" >> models/code/inference.py
+        printf "    clf = joblib.load(os.path.join(model_dir, 'model.pkl'))\n" >> models/code/inference.py
+        printf "    vec = joblib.load(os.path.join(model_dir, 'vectorizer.pkl'))\n" >> models/code/inference.py
+        printf "    return clf, vec\n\n" >> models/code/inference.py
+        printf "def predict_fn(input_data, model):\n" >> models/code/inference.py
+        printf "    clf, vec = model\n" >> models/code/inference.py
+        printf "    if isinstance(input_data, str): input_data = [input_data]\n" >> models/code/inference.py
+        printf "    processed_data = vec.transform(input_data)\n" >> models/code/inference.py
+        printf "    return clf.predict(processed_data)\n" >> models/code/inference.py
         
-        # 5. Create requirements.txt (Flat structure)
-        echo "joblib" > models/requirements.txt
-        echo "numpy<2.0.0" >> models/requirements.txt
+        # 5. Create requirements.txt in code/ directory
+        echo "joblib" > models/code/requirements.txt
+        echo "numpy<2.0.0" >> models/code/requirements.txt
         
-        # 6. Package everything (Flat structure)
-        tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl inference.py requirements.txt
+        # 6. Package everything (Standard structure: model files at root, code/ dir)
+        tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl code
         
         # 7. Move models to workspace root if we are in a subdirectory
         if [ "$(pwd)" != "$GITHUB_WORKSPACE" ]; then
@@ -162,7 +152,7 @@ jobs:
         # 1. Create SageMaker Model
         aws sagemaker create-model \
           --model-name "$UNIQUE_MODEL_NAME" \
-          --primary-container "Image=720646828776.dkr.ecr.${AWS_REGION}.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3,ModelDataUrl=s3://${S3_BUCKET}/amazon-reviews/model.tar.gz,Environment={SAGEMAKER_PROGRAM=inference.py,SAGEMAKER_SUBMIT_DIRECTORY=/opt/ml/model}" \
+          --primary-container "Image=720646828776.dkr.ecr.${AWS_REGION}.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3,ModelDataUrl=s3://${S3_BUCKET}/amazon-reviews/model.tar.gz,Environment={SAGEMAKER_PROGRAM=inference.py}" \
           --execution-role-arn "$SAGEMAKER_ROLE_ARN" \
           --region "$AWS_REGION"
           
