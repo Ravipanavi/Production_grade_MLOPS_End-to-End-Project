@@ -94,16 +94,15 @@ jobs:
         printf "    vec = joblib.load(os.path.join(model_dir, 'vectorizer.pkl'))\n" >> models/code/inference.py
         printf "    return clf, vec\n\n" >> models/code/inference.py
         printf "def predict_fn(input_data, model):\n" >> models/code/inference.py
+        printf "    # input_data is the deserialized JSON from the request body\n" >> models/code/inference.py
         printf "    clf, vec = model\n" >> models/code/inference.py
-        printf "    if isinstance(input_data, str): input_data = [input_data]\n" >> models/code/inference.py
-        printf "    processed_data = vec.transform(input_data)\n" >> models/code/inference.py
-        printf "    return clf.predict(processed_data)\n" >> models/code/inference.py
+        printf "    text_data = input_data.get('text', [])\n" >> models/code/inference.py
+        printf "    if isinstance(text_data, str):\n" >> models/code/inference.py
+        printf "        text_data = [text_data]\n" >> models/code/inference.py
+        printf "    processed_data = vec.transform(text_data)\n" >> models/code/inference.py
+        printf "    return clf.predict(processed_data).tolist()\n" >> models/code/inference.py
         
-        # 5. Create requirements.txt in models/code/
-        echo "joblib" > models/code/requirements.txt
-        echo "numpy<2.0.0" >> models/code/requirements.txt
-        
-        # 6. Package everything (Standard structure: model files at root, code/ dir)
+        # 5. Package everything (Standard structure, NO requirements.txt)
         tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl code
         
         # 7. Move models to workspace root if we are in a subdirectory
@@ -165,6 +164,7 @@ jobs:
         # 3. Create or Update Endpoint
         # Check if endpoint exists
         if aws sagemaker describe-endpoint --endpoint-name "$ENDPOINT_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+          OLD_CONFIG_NAME=$(aws sagemaker describe-endpoint --endpoint-name "$ENDPOINT_NAME" --region "$AWS_REGION" --query 'EndpointConfigName' --output text)
           echo "Endpoint $ENDPOINT_NAME exists. Updating..."
           aws sagemaker update-endpoint \
             --endpoint-name "$ENDPOINT_NAME" \
@@ -181,4 +181,43 @@ jobs:
         echo "Waiting for endpoint to be InService..."
         aws sagemaker wait endpoint-in-service \
           --endpoint-name "$ENDPOINT_NAME" \
+          --region "$AWS_REGION" || (echo "::error::Endpoint failed to become InService." && exit 1)
+
+        # Clean up the old endpoint configuration after a successful update
+        if [ ! -z "$OLD_CONFIG_NAME" ]; then
+          echo "Cleaning up old endpoint config: $OLD_CONFIG_NAME"
+          aws sagemaker delete-endpoint-config --endpoint-config-name "$OLD_CONFIG_NAME" --region "$AWS_REGION"
+        fi
+
+    - name: Test Deployed Endpoint
+      if: success()
+      env:
+        ENDPOINT_NAME: ${{ secrets.ENDPOINT_NAME }}
+        AWS_REGION: ${{ secrets.AWS_REGION }}
+      run: |
+        # Sanitize the endpoint name just like in the deployment step
+        ENDPOINT_NAME=$(echo "$ENDPOINT_NAME" | tr '_' '-' | sed 's/[^a-zA-Z0-9-]//g' | sed 's/^-*//' | sed 's/-*$//' | cut -c 1-63)
+        
+        echo "Invoking endpoint $ENDPOINT_NAME..."
+        
+        # Create a payload file
+        echo '{"text": "This product is absolutely amazing"}' > payload.json
+        
+        # Invoke the endpoint
+        aws sagemaker-runtime invoke-endpoint \
+          --endpoint-name "$ENDPOINT_NAME" \
+          --content-type "application/json" \
+          --body fileb://payload.json \
+          output.json \
           --region "$AWS_REGION"
+          
+        echo "Invocation response:"
+        cat output.json
+        
+        # A simple check to see if the output file contains a prediction
+        if grep -q "\[" output.json; then
+          echo "Endpoint test successful!"
+        else
+          echo "::error::Endpoint test failed. Response did not contain a prediction."
+          exit 1
+        fi
