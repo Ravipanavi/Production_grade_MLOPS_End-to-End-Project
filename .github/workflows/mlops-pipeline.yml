@@ -7,7 +7,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
     - name: Checkout code
@@ -28,51 +28,6 @@ jobs:
 
     - name: Train and Package Model
       run: |
-        # 1. Handle potential nested directory structure
-        if [ ! -d "scripts" ] && [ -d "Production_Grade_MLOps/scripts" ]; then
-          echo "Detected nested structure. Changing directory to Production_Grade_MLOps"
-          cd Production_Grade_MLOps
-        fi
-        
-        # 2. Create a robust training script on the fly
-        # This ensures we have a working script regardless of repository state
-        mkdir -p scripts
-        echo "Creating robust training script..."
-        cat <<EOF > scripts/train.py
-        import argparse
-        import os
-        import joblib
-        from sklearn.feature_extraction.text import CountVectorizer
-        from sklearn.linear_model import LogisticRegression
-
-        def train(model_dir):
-            print(f"Training model and saving to {model_dir}...")
-            # Dummy data
-            X = ["I love this product", "This is amazing", "I hate this", "Terrible service"]
-            y = [1, 1, 0, 0]
-            
-            vectorizer = CountVectorizer()
-            X_vec = vectorizer.fit_transform(X)
-            
-            model = LogisticRegression()
-            model.fit(X_vec, y)
-            
-            os.makedirs(model_dir, exist_ok=True)
-            model_path = os.path.join(model_dir, "model.pkl")
-            vec_path = os.path.join(model_dir, "vectorizer.pkl")
-            
-            joblib.dump(model, model_path)
-            joblib.dump(vectorizer, vec_path)
-            print(f"Saved model to {model_path}")
-            print(f"Saved vectorizer to {vec_path}")
-
-        if __name__ == "__main__":
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--model-dir", type=str, default="models")
-            args = parser.parse_args()
-            train(args.model_dir)
-        EOF
-        
         # 3. Train the model
         mkdir -p models
         python scripts/train.py --model-dir models
@@ -82,11 +37,6 @@ jobs:
           echo "::error::Model artifacts missing from models/ directory."
           ls -R models
           exit 1
-        fi
-        
-        # 7. Move models to workspace root if we are in a subdirectory
-        if [ "$(pwd)" != "$GITHUB_WORKSPACE" ]; then
-          mv models "$GITHUB_WORKSPACE/"
         fi
 
     - name: Configure AWS credentials
@@ -106,8 +56,9 @@ jobs:
         ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        REPO_NAME=${ECR_REPOSITORY:-amazon-reviews}
+        docker build -t $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG
 
     - name: Deploy to EKS
       env:
@@ -116,7 +67,13 @@ jobs:
         IMAGE_TAG: ${{ github.sha }}
         EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
       run: |
+        REPO_NAME=${ECR_REPOSITORY:-amazon-reviews}
         aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region ${{ secrets.AWS_REGION }}
-        sed -i "s|image: amazon-reviews:latest|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|g" deployment.yaml
+        sed -i "s|image: amazon-reviews:latest|image: $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG|g" deployment.yaml
         kubectl apply -f deployment.yaml
         kubectl rollout status deployment/amazon-reviews-app
+
+    - name: Cleanup Docker Images
+      if: always()
+      run: |
+        docker system prune -f
