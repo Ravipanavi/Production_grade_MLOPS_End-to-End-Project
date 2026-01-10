@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amazon-reviews-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: amazon-reviews
+  template:
+    metadata:
+      labels:
+        app: amazon-reviews
+    spec:
+      containers:
+      - name: amazon-reviews-container
+        image: amazon-reviews:latest
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amazon-reviews-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: amazon-reviews
+  ports:
+  - port: 80
+    targetPort: 8080

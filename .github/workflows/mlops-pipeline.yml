@@ -84,27 +84,6 @@ jobs:
           exit 1
         fi
         
-        # 4. Prepare model artifacts (Standard SageMaker structure with code/ dir)
-        mkdir -p models/code
-        
-        # Create inference.py in models/code/
-        printf "import joblib\nimport os\nimport json\n\n" > models/code/inference.py
-        printf "def model_fn(model_dir):\n" >> models/code/inference.py
-        printf "    clf = joblib.load(os.path.join(model_dir, 'model.pkl'))\n" >> models/code/inference.py
-        printf "    vec = joblib.load(os.path.join(model_dir, 'vectorizer.pkl'))\n" >> models/code/inference.py
-        printf "    return clf, vec\n\n" >> models/code/inference.py
-        printf "def predict_fn(input_data, model):\n" >> models/code/inference.py
-        printf "    # input_data is the deserialized JSON from the request body\n" >> models/code/inference.py
-        printf "    clf, vec = model\n" >> models/code/inference.py
-        printf "    text_data = input_data.get('text', [])\n" >> models/code/inference.py
-        printf "    if isinstance(text_data, str):\n" >> models/code/inference.py
-        printf "        text_data = [text_data]\n" >> models/code/inference.py
-        printf "    processed_data = vec.transform(text_data)\n" >> models/code/inference.py
-        printf "    return clf.predict(processed_data).tolist()\n" >> models/code/inference.py
-        
-        # 5. Package everything (Standard structure, NO requirements.txt)
-        tar -czf models/model.tar.gz -C models model.pkl vectorizer.pkl code
-        
         # 7. Move models to workspace root if we are in a subdirectory
         if [ "$(pwd)" != "$GITHUB_WORKSPACE" ]; then
           mv models "$GITHUB_WORKSPACE/"
@@ -117,107 +96,27 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_REGION }}
 
-    - name: Upload model artifacts to S3
-      run: |
-        aws s3 cp models/model.tar.gz \
-          s3://${{ secrets.S3_BUCKET }}/amazon-reviews/model.tar.gz
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Deploy to SageMaker
+    - name: Build, tag, and push image to Amazon ECR
       env:
-        MODEL_NAME: ${{ secrets.MODEL_NAME }}
-        ENDPOINT_NAME: ${{ secrets.ENDPOINT_NAME }}
-        AWS_REGION: ${{ secrets.AWS_REGION }}
-        SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
-        S3_BUCKET: ${{ secrets.S3_BUCKET }}
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+        IMAGE_TAG: ${{ github.sha }}
       run: |
-        if [ -z "$MODEL_NAME" ] || [ -z "$ENDPOINT_NAME" ]; then
-          echo "::error::MODEL_NAME or ENDPOINT_NAME secrets are not set."
-          exit 1
-        fi
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-        # Sanitize Names (SageMaker does not allow underscores)
-        # Replace '_' with '-' and remove any non-alphanumeric characters (except hyphens)
-        # Also ensure it doesn't start or end with a hyphen and is within limits (30 chars for model to allow suffix)
-        MODEL_NAME=$(echo "$MODEL_NAME" | tr '_' '-' | sed 's/[^a-zA-Z0-9-]//g' | sed 's/^-*//' | sed 's/-*$//' | cut -c 1-30)
-        ENDPOINT_NAME=$(echo "$ENDPOINT_NAME" | tr '_' '-' | sed 's/[^a-zA-Z0-9-]//g' | sed 's/^-*//' | sed 's/-*$//' | cut -c 1-63)
-        
-        # Generate a unique tag for this deployment
-        TIMESTAMP=$(date +%Y-%m-%d-%H-%M-%S)
-        UNIQUE_MODEL_NAME="${MODEL_NAME}-${TIMESTAMP}"
-        UNIQUE_CONFIG_NAME="${MODEL_NAME}-config-${TIMESTAMP}"
-        echo "Deploying Model: $UNIQUE_MODEL_NAME"
-        
-        # 1. Create SageMaker Model
-        aws sagemaker create-model \
-          --model-name "$UNIQUE_MODEL_NAME" \
-          --primary-container "Image=720646828776.dkr.ecr.${AWS_REGION}.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3,ModelDataUrl=s3://${S3_BUCKET}/amazon-reviews/model.tar.gz,Environment={SAGEMAKER_PROGRAM=inference.py}" \
-          --execution-role-arn "$SAGEMAKER_ROLE_ARN" \
-          --region "$AWS_REGION"
-          
-        # 2. Create Endpoint Configuration
-        aws sagemaker create-endpoint-config \
-          --endpoint-config-name "$UNIQUE_CONFIG_NAME" \
-          --production-variants \
-            "VariantName=AllTraffic,ModelName=$UNIQUE_MODEL_NAME,InitialInstanceCount=1,InstanceType=ml.t2.medium" \
-          --region "$AWS_REGION"
-          
-        # 3. Create or Update Endpoint
-        # Check if endpoint exists
-        if aws sagemaker describe-endpoint --endpoint-name "$ENDPOINT_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
-          OLD_CONFIG_NAME=$(aws sagemaker describe-endpoint --endpoint-name "$ENDPOINT_NAME" --region "$AWS_REGION" --query 'EndpointConfigName' --output text)
-          echo "Endpoint $ENDPOINT_NAME exists. Updating..."
-          aws sagemaker update-endpoint \
-            --endpoint-name "$ENDPOINT_NAME" \
-            --endpoint-config-name "$UNIQUE_CONFIG_NAME" \
-            --region "$AWS_REGION"
-        else
-          echo "Endpoint $ENDPOINT_NAME does not exist. Creating..."
-          aws sagemaker create-endpoint \
-            --endpoint-name "$ENDPOINT_NAME" \
-            --endpoint-config-name "$UNIQUE_CONFIG_NAME" \
-            --region "$AWS_REGION"
-        fi
-        
-        echo "Waiting for endpoint to be InService..."
-        aws sagemaker wait endpoint-in-service \
-          --endpoint-name "$ENDPOINT_NAME" \
-          --region "$AWS_REGION" || (echo "::error::Endpoint failed to become InService." && exit 1)
-
-        # Clean up the old endpoint configuration after a successful update
-        if [ ! -z "$OLD_CONFIG_NAME" ]; then
-          echo "Cleaning up old endpoint config: $OLD_CONFIG_NAME"
-          aws sagemaker delete-endpoint-config --endpoint-config-name "$OLD_CONFIG_NAME" --region "$AWS_REGION"
-        fi
-
-    - name: Test Deployed Endpoint
-      if: success()
+    - name: Deploy to EKS
       env:
-        ENDPOINT_NAME: ${{ secrets.ENDPOINT_NAME }}
-        AWS_REGION: ${{ secrets.AWS_REGION }}
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+        IMAGE_TAG: ${{ github.sha }}
+        EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
       run: |
-        # Sanitize the endpoint name just like in the deployment step
-        ENDPOINT_NAME=$(echo "$ENDPOINT_NAME" | tr '_' '-' | sed 's/[^a-zA-Z0-9-]//g' | sed 's/^-*//' | sed 's/-*$//' | cut -c 1-63)
-        
-        echo "Invoking endpoint $ENDPOINT_NAME..."
-        
-        # Create a payload file
-        echo '{"text": "This product is absolutely amazing"}' > payload.json
-        
-        # Invoke the endpoint
-        aws sagemaker-runtime invoke-endpoint \
-          --endpoint-name "$ENDPOINT_NAME" \
-          --content-type "application/json" \
-          --body fileb://payload.json \
-          output.json \
-          --region "$AWS_REGION"
-          
-        echo "Invocation response:"
-        cat output.json
-        
-        # A simple check to see if the output file contains a prediction
-        if grep -q "\[" output.json; then
-          echo "Endpoint test successful!"
-        else
-          echo "::error::Endpoint test failed. Response did not contain a prediction."
-          exit 1
-        fi
+        aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region ${{ secrets.AWS_REGION }}
+        sed -i "s|image: amazon-reviews:latest|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|g" deployment.yaml
+        kubectl apply -f deployment.yaml
+        kubectl rollout status deployment/amazon-reviews-app
